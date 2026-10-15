@@ -86,14 +86,14 @@ enum SpoolError {
 /// Windows spooler) when it is there; else CUPS over IPP; and the app's spooler when that had
 /// no route either. A route that exists but fails (an unknown printer, a refused job) is an
 /// error, never a fall-through.
-fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job) -> Result<(String, String)> {
+fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job, fallback: bool, submit: &mut Submit) -> Result<(String, String)> {
     let app = |sp: &Spooler| (sp.run)(job).map(|m| (m, sp.name.to_string())).map_err(other);
     if job.server.is_none() {
         if let Some(sp) = spooler.filter(|sp| sp.preferred) {
             return app(sp);
         }
         if let Some(name) = system_spooler() {
-            return craft_print::submit(&job.pdf, lp).map(|m| (m, name.to_string())).map_err(other);
+            return spool_with_paper_fallback(&job.pdf, lp, fallback, submit).map(|m| (m, name.to_string()));
         }
     }
     match cups_spool(job) {
@@ -194,10 +194,10 @@ fn cups_spool(job: &PrintJob) -> std::result::Result<String, SpoolError> {
 /// server and where there is no `lp` (a sandbox).
 fn system_printers(_s: &mut Session, p: &Value) -> Result<Value> {
     let named = p.get("printServer").and_then(Value::as_str).filter(|v| !v.is_empty());
-    if named.is_none() && system_spooler().is_some() {
-        let list = craft_print::printers();
-        let default = list.iter().find(|p| p.default).map(|p| p.name.clone());
-        let printers: Vec<Value> = list.into_iter().map(|p| json!({"name": p.name, "default": p.default})).collect();
+    if named.is_none() && (injected_printers().is_some() || system_spooler().is_some()) {
+        let list: Vec<(String, bool)> = injected_printers().unwrap_or_else(|| craft_print::printers().into_iter().map(|p| (p.name, p.default)).collect());
+        let default = list.iter().find(|p| p.1).map(|p| p.0.clone());
+        let printers: Vec<Value> = list.into_iter().map(|(name, default)| json!({"name": name, "default": default})).collect();
         return Ok(json!({"server": Value::Null, "default": default, "printers": printers}));
     }
     #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
@@ -411,8 +411,49 @@ pub fn print_pdf(page: &PrintPage) -> Vec<u8> {
 
 // ---------- Print ----------
 
-/// The flattened, colour-handled document as 8-bit samples in its print colour space.
+/// Rec. 709 luma of an 8-bit RGB sample: the one gray every Grayscale print and preview uses.
+pub fn luma709(r: u8, g: u8, b: u8) -> u8 {
+    (0.2126 * f32::from(r) + 0.7152 * f32::from(g) + 0.0722 * f32::from(b)).round().clamp(0.0, 255.0) as u8
+}
+
+/// Whether the Print parameters ask for Grayscale (the dialog's box, or the network printer's Colour setting).
+pub fn wants_grayscale(p: &Value) -> bool {
+    p.get("grayscale").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// `img` as one gray channel (Rec. 709). An RGB image's profile described RGB, so it goes with the colour.
+fn into_gray(img: PrintImage) -> PrintImage {
+    let data: Vec<u8> = match img.channels {
+        1 => return img,
+        3 => img.data.as_chunks::<3>().0.iter().map(|c| luma709(c[0], c[1], c[2])).collect(),
+        // CMYK samples (1 = full ink) as the light they leave: (1 - c)(1 - k) per channel.
+        _ => img
+            .data
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|c| {
+                let white = (1.0 - f32::from(c[3]) / 255.0) * 255.0;
+                let ch = |v: u8| (white * (1.0 - f32::from(v) / 255.0)).round() as u8;
+                luma709(ch(c[0]), ch(c[1]), ch(c[2]))
+            })
+            .collect(),
+    };
+    PrintImage { width: img.width, height: img.height, channels: 1, data, icc: None }
+}
+
+/// The flattened, colour-handled document as 8-bit samples in its print colour space. With
+/// `"grayscale": true` the samples are gray (Rec. 709), whatever the document's mode.
 fn print_image(doc: &Document, p: &Value, cmd: &str) -> Result<(PrintImage, Value)> {
+    let (img, mut info) = print_image_color(doc, p, cmd)?;
+    if wants_grayscale(p) {
+        info["grayscale"] = json!(true);
+        return Ok((into_gray(img), info));
+    }
+    Ok((img, info))
+}
+
+fn print_image_color(doc: &Document, p: &Value, cmd: &str) -> Result<(PrintImage, Value)> {
     let mut t = Session::new();
     t.add_document(doc.clone(), None);
     let handling = p.get("colorHandling").and_then(Value::as_str).unwrap_or("printerManages");
@@ -587,6 +628,12 @@ fn make_page(doc: &Document, p: &Value, cmd: &str) -> Result<(PrintPage, PrintLa
 }
 
 fn render_and_spool(doc: &Document, p: &Value, cmd: &str, spooler: Option<&Spooler>) -> Result<Value> {
+    render_and_spool_via(doc, p, cmd, spooler, None)
+}
+
+/// [`render_and_spool`] with the hand-over to the local spooler given (tests give an in-process one,
+/// which is not subject to `disable_printing`: nothing leaves the process).
+fn render_and_spool_via(doc: &Document, p: &Value, cmd: &str, spooler: Option<&Spooler>, submit: Option<&mut Submit>) -> Result<Value> {
     let (page, PrintLayout { paper: (pw, ph), rect: (x, y, w, h), scale, emulsion_down, .. }, color) = make_page(doc, p, cmd)?;
     let output = p.get("output").and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string);
     let send = p.get("send").and_then(Value::as_bool).unwrap_or(output.is_none());
@@ -614,15 +661,7 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str, spooler: Option<&Spool
     }
     let pdf = print_pdf(&page);
     let pdf_len = pdf.len();
-    let job = craft_print::Job {
-        printer: p.get("printer").and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string),
-        copies,
-        title: doc.name.clone(),
-        // PhotoCraft already placed and scaled the image on its physical sheet. Scaling again
-        // in the driver would change the preview, print resolution and crop-mark positions.
-        scaling: craft_print::Scaling::Exact,
-        ..Default::default()
-    };
+    let job = local_job(p, &doc.name, copies);
     let command = if send { json!(craft_print::command_preview(&job).map_err(other)?) } else { Value::Null };
     let pdf_path = match output {
         Some(path) => {
@@ -635,7 +674,14 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str, spooler: Option<&Spool
     let mut spool = Value::Null;
     let mut backend = Value::Null;
     if send && !dry {
-        require_printing_enabled()?;
+        let mut system = |pdf: &[u8], job: &craft_print::Job| craft_print::submit(pdf, job).map_err(|e| e.to_string());
+        let submit: &mut Submit = match submit {
+            Some(given) => given,
+            None => {
+                require_printing_enabled()?;
+                &mut system
+            }
+        };
         let print_job = PrintJob {
             printer: job.printer.clone(),
             copies,
@@ -645,7 +691,7 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str, spooler: Option<&Spool
             landscape: p.get("orientation").and_then(Value::as_str) == Some("landscape"),
             pdf,
         };
-        let (where_, via) = spool_job(spooler, &print_job, &job)?;
+        let (where_, via) = spool_job(spooler, &print_job, &job, paper_fallback(p), submit)?;
         spool = json!(where_);
         backend = json!(via);
         sent = true;
@@ -653,6 +699,51 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str, spooler: Option<&Spool
     Ok(
         json!({"pdf": pdf_path, "bytes": pdf_len, "paper": [pw, ph], "imageRect": [x, y, w, h], "emulsionDown": emulsion_down, "scale": scale * 100.0, "copies": copies, "command": command, "sent": sent, "spooler": spool, "backend": backend, "color": color}),
     )
+}
+
+/// Hands a print-ready PDF and its job to a spooler: the queue's answer, or its refusal in words.
+type Submit<'a> = dyn FnMut(&[u8], &craft_print::Job) -> std::result::Result<String, String> + 'a;
+
+/// The job a local queue gets for the Print parameters `p`. PhotoCraft already placed and scaled the
+/// image on the physical sheet the person chose, so the driver must not scale it again (that would
+/// change the preview, the print resolution and the crop-mark positions): the sheet is demanded
+/// exactly. `grayscale` is also the driver's hint, besides the gray samples themselves.
+fn local_job(p: &Value, title: &str, copies: u32) -> craft_print::Job {
+    craft_print::Job {
+        printer: p.get("printer").and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string),
+        copies,
+        title: title.to_string(),
+        scaling: craft_print::Scaling::Exact,
+        grayscale: wants_grayscale(p),
+        ..Default::default()
+    }
+}
+
+/// The person allowed the printer's own paper for a queue that lacks the chosen one (`paperFallback`).
+fn paper_fallback(p: &Value) -> bool {
+    p.get("paperFallback").and_then(Value::as_bool).unwrap_or(false)
+}
+
+/// Is this spooler error "the queue has no such paper" (craft-print's wording for an exact sheet)?
+pub fn is_missing_paper(message: &str) -> bool {
+    message.contains(" has no ") && message.contains(" inch paper")
+}
+
+/// Hands the PDF to `submit`. A queue that lacks the chosen paper refuses the exact job; then, only
+/// when the person ticked "use the printer's own paper" (`fallback`), the same job goes again on the
+/// queue's default paper, shrunk to fit. Otherwise the refusal is the answer, said plainly.
+fn spool_with_paper_fallback(pdf: &[u8], job: &craft_print::Job, fallback: bool, submit: &mut Submit) -> Result<String> {
+    match submit(pdf, job) {
+        Err(e) if is_missing_paper(&e) && job.scaling == craft_print::Scaling::Exact => {
+            if fallback {
+                let own = craft_print::Job { scaling: craft_print::Scaling::ShrinkToFit, ..job.clone() };
+                submit(pdf, &own).map_err(other)
+            } else {
+                Err(other(format!("{e}. Tick \"Use the printer's own paper if it lacks this one\" in Print to fit the page on the paper it has.")))
+            }
+        }
+        other_result => other_result.map_err(other),
+    }
 }
 
 /// Keep CMYK output profiles and page text on the existing PDF composition path. GDI currently
@@ -755,7 +846,26 @@ fn print_windows(page: &PrintPage, p: &Value, title: &str, copies: u32) -> Resul
     )
 }
 
+thread_local! {
+    /// In-process printer list for tests and embedding (see [`use_printer_list`]).
+    static PRINTER_LIST: std::cell::RefCell<Option<Vec<(String, bool)>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Makes this thread's printer commands (`file.printers`, `file.print.printers`) answer with `list`
+/// (name, is default) instead of asking the system; `None` goes back to asking the system. A seam
+/// for tests and hosts that bring their own list: it filters nothing and only replaces the source.
+pub fn use_printer_list(list: Option<Vec<(String, bool)>>) {
+    PRINTER_LIST.with(|l| *l.borrow_mut() = list);
+}
+
+fn injected_printers() -> Option<Vec<(String, bool)>> {
+    PRINTER_LIST.with(|l| l.borrow().clone())
+}
+
 fn printers(_: &mut Session, _: &Value) -> Result<Value> {
+    if let Some(list) = injected_printers() {
+        return Ok(json!({"supported": true, "printers": list.iter().map(|(name, default)| json!({"name": name, "default": default})).collect::<Vec<_>>()}));
+    }
     match craft_print::rgb::printers() {
         Ok(list) => Ok(json!({"supported": true, "printers": list.iter().map(|p| json!({"name": p.name, "default": p.default})).collect::<Vec<_>>()})),
         Err(craft_print::rgb::PrintError::Unsupported) => Ok(json!({"supported": false, "printers": []})),
@@ -973,7 +1083,7 @@ pub fn specs() -> Vec<CommandSpec> {
             CommandSpec { id: $id, label: $label, menu: $menu, shortcut: $sc, params: $params, enabled: $enabled, journal: true, run: $run }
         };
     }
-    const PRINT_PARAMS: &str = r##"{"printerSettings":hex? (Windows driver settings),"printer":name? (default printer),"copies":1..999=1,"paper":"letter|legal|tabloid|a3|a4|a5|4x6|5x7"|[w,h] pt="letter","orientation":"portrait|landscape"="portrait","center":bool=true,"top":in?,"left":in?,"scale":%=100,"scaleToFit":bool=false,"colorHandling":"printerManages|photocraftManages|noColorManagement"="printerManages","printerProfile":profile? (photocraftManages),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true,"cornerCropMarks":bool,"centerCropMarks":bool,"registrationMarks":bool,"description":bool,"labels":bool,"emulsionDown":bool=false (mirror the page left to right, for sublimation and other transfer printing),"output":pdf path? (print to PDF; then "send" defaults to false),"send":bool?,"printServer":"host[:port]|socket path"? (default: the system's CUPS; a named server is always printed to over IPP),"dryRun":bool=false (render the PDF, report the backend command, don't spool; write a PDF only at an explicit output path)} → {pdf:path|null (null without explicit output), imageRect, command:diagnostic array|null, sent, spooler:where the job went|null, backend:"lp|windows|ipp|portal"|null}"##;
+    const PRINT_PARAMS: &str = r##"{"printerSettings":hex? (Windows driver settings),"printer":name? (default printer),"copies":1..999=1,"paper":"letter|legal|tabloid|a3|a4|a5|4x6|5x7"|[w,h] pt="letter","orientation":"portrait|landscape"="portrait","center":bool=true,"top":in?,"left":in?,"scale":%=100,"scaleToFit":bool=false,"colorHandling":"printerManages|photocraftManages|noColorManagement"="printerManages","printerProfile":profile? (photocraftManages),"intent":"perceptual|relative|saturation|absolute"="relative","bpc":bool=true,"cornerCropMarks":bool,"centerCropMarks":bool,"registrationMarks":bool,"description":bool,"labels":bool,"emulsionDown":bool=false (mirror the page left to right, for sublimation and other transfer printing),"grayscale":bool=false (gray samples, Rec. 709, and the driver's monochrome hint),"paperFallback":bool=false (a local queue without the chosen paper prints on its own paper, shrunk to fit),"output":pdf path? (print to PDF; then "send" defaults to false),"send":bool?,"printServer":"host[:port]|socket path"? (default: the system's CUPS; a named server is always printed to over IPP),"dryRun":bool=false (render the PDF, report the backend command, don't spool; write a PDF only at an explicit output path)} → {pdf:path|null (null without explicit output), imageRect, command:diagnostic array|null, sent, spooler:where the job went|null, backend:"lp|windows|ipp|portal"|null}"##;
 
     vec![
         spec!("file.print", "Print…", &["File"], Some("Cmd+P"), PRINT_PARAMS, native_doc, print),
