@@ -20,7 +20,10 @@
 
 use std::io::Write as _;
 
+mod network;
 mod windows_marks;
+
+pub use network::{NetworkPrint, prepare_network_print};
 
 use photocraft_color::ColorMode;
 use photocraft_doc::{Document, LayerContent, SmartSource};
@@ -568,8 +571,11 @@ fn do_print(s: &mut Session, p: &Value, cmd: &str) -> Result<Value> {
     Ok(result)
 }
 
-fn render_and_spool(doc: &Document, p: &Value, cmd: &str, spooler: Option<&Spooler>) -> Result<Value> {
-    let PrintLayout { paper: (pw, ph), rect: (x, y, w, h), scale, marks, emulsion_down } = layout(doc, p, cmd)?;
+/// The page the Print parameters `p` describe: layout, flattened and colour-handled image, marks and
+/// texts. Shared by the spooler paths and the network printer.
+fn make_page(doc: &Document, p: &Value, cmd: &str) -> Result<(PrintPage, PrintLayout, Value)> {
+    let l = layout(doc, p, cmd)?;
+    let PrintLayout { paper, rect, marks, emulsion_down, .. } = l;
     let (img, color) = print_image(doc, p, cmd)?;
     let description = p
         .get("description")
@@ -577,7 +583,11 @@ fn render_and_spool(doc: &Document, p: &Value, cmd: &str, spooler: Option<&Spool
         .unwrap_or(false)
         .then(|| crate::file_cmds::read_file_info(doc.metadata.xmp.as_deref())["description"].as_str().unwrap_or_default().to_string());
     let label = p.get("labels").and_then(Value::as_bool).unwrap_or(false).then(|| doc.name.clone());
-    let page = PrintPage { paper: (pw, ph), image: img, rect: (x, y, w, h), marks, description, label, emulsion_down };
+    Ok((PrintPage { paper, image: img, rect, marks, description, label, emulsion_down }, l, color))
+}
+
+fn render_and_spool(doc: &Document, p: &Value, cmd: &str, spooler: Option<&Spooler>) -> Result<Value> {
+    let (page, PrintLayout { paper: (pw, ph), rect: (x, y, w, h), scale, emulsion_down, .. }, color) = make_page(doc, p, cmd)?;
     let output = p.get("output").and_then(Value::as_str).filter(|v| !v.is_empty()).map(str::to_string);
     let send = p.get("send").and_then(Value::as_bool).unwrap_or(output.is_none());
     let copies = crate::commands::int(p, "copies").unwrap_or(1).clamp(1, 999) as u32;
