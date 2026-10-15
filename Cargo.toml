@@ -41,8 +41,8 @@ photocraft-ipp = { path = "crates/ipp" }
 photocraft-print = { path = "crates/print" }
 
 # external
-# Shared print backends and registry (storytold/craft-libs#116: WS-Print, IPP, tracked jobs) until it merges. The `wsd` and `ipp` features
-# are chosen by photocraft-print's `network-print` feature, so a build without it has the spooler only.
+# Shared print backends and registry (storytold/craft-libs#116: WS-Print, IPP, tracked jobs) until it merges. The `wsd` and `ipp` features are chosen by
+# photocraft-print's `network-print` feature, so a build without it has the spooler only.
 craft-print = { git = "https://github.com/storytold/craft-libs", rev = "refs/pull/116/head", default-features = false }
 craft-docpath = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "82a24b006eefa036b43c09a67fb9a3fbd17ffe63" }
 thiserror = "2"
