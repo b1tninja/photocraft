@@ -71,6 +71,7 @@ fn fields(h: &Harness<'_, PhotocraftApp>, id: u64) -> Map<String, Value> {
 }
 
 #[test]
+#[cfg(network_print)]
 fn one_printer_list_holds_the_system_printers_and_the_network_entry() {
     let (mut h, id) = open();
     assert_eq!(count(&h, "Destination"), 0, "there is no second menu to pick the kind of printer from");
@@ -101,6 +102,7 @@ fn one_printer_list_holds_the_system_printers_and_the_network_entry() {
 }
 
 #[test]
+#[cfg(network_print)]
 fn a_queried_network_printer_is_its_own_entry_by_the_name_it_reported() {
     let (mut h, _) = open();
     // An in-process printer answers the query (WS-Print over an in-memory transport).
@@ -160,6 +162,7 @@ fn the_windows_driver_list_has_the_default_first_and_marked() {
 }
 
 #[test]
+#[cfg(network_print)]
 fn grayscale_is_in_the_dialog_the_preview_and_the_network_colour_setting() {
     let (mut h, id) = open();
     assert_eq!(count(&h, "Black and white"), 0);
@@ -206,6 +209,7 @@ fn a_gray_preview_pixel_is_rec_709_luma_with_its_alpha() {
 }
 
 #[test]
+#[cfg(network_print)]
 fn the_network_colour_choice_and_its_reason_say_grayscale() {
     let l = crate::network_glue::labels();
     assert_eq!(l.color_monochrome, "Grayscale");

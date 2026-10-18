@@ -88,8 +88,16 @@ pub(crate) fn wsd(elements: &PrinterElements) -> Caps {
 }
 
 /// The media names the dialog's sheet sizes map to.
-pub(crate) const PAPER_MEDIA: &[&str] =
-    &["na_letter_8.5x11in", "na_legal_8.5x14in", "na_ledger_11x17in", "iso_a3_297x420mm", "iso_a4_210x297mm", "iso_a5_148x210mm"];
+pub(crate) const PAPER_MEDIA: &[&str] = &[
+    "na_letter_8.5x11in",
+    "na_legal_8.5x14in",
+    "na_ledger_11x17in",
+    "iso_a3_297x420mm",
+    "iso_a4_210x297mm",
+    "iso_a5_148x210mm",
+    "na_index-4x6_4x6in",
+    "na_5x7_5x7in",
+];
 
 fn side_token(s: &str) -> Option<&'static str> {
     Some(match s {

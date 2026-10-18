@@ -86,13 +86,20 @@ enum SpoolError {
 /// Windows spooler) when it is there; else CUPS over IPP; and the app's spooler when that had
 /// no route either. A route that exists but fails (an unknown printer, a refused job) is an
 /// error, never a fall-through.
-fn spool_job(spooler: Option<&Spooler>, job: &PrintJob, lp: &craft_print::Job, fallback: bool, submit: &mut Submit) -> Result<(String, String)> {
+fn spool_job(
+    spooler: Option<&Spooler>,
+    job: &PrintJob,
+    local: Option<&'static str>,
+    lp: &craft_print::Job,
+    fallback: bool,
+    submit: &mut Submit,
+) -> Result<(String, String)> {
     let app = |sp: &Spooler| (sp.run)(job).map(|m| (m, sp.name.to_string())).map_err(other);
     if job.server.is_none() {
         if let Some(sp) = spooler.filter(|sp| sp.preferred) {
             return app(sp);
         }
-        if let Some(name) = system_spooler() {
+        if let Some(name) = local {
             return spool_with_paper_fallback(&job.pdf, lp, fallback, submit).map(|m| (m, name.to_string()));
         }
     }
@@ -675,11 +682,13 @@ fn render_and_spool_via(doc: &Document, p: &Value, cmd: &str, spooler: Option<&S
     let mut backend = Value::Null;
     if send && !dry {
         let mut system = |pdf: &[u8], job: &craft_print::Job| craft_print::submit(pdf, job).map_err(|e| e.to_string());
-        let submit: &mut Submit = match submit {
-            Some(given) => given,
+        // A hand-over given by the caller is the local route, whatever this host has installed (a
+        // container without `lp` still reaches it); otherwise the local route is the system spooler.
+        let (submit, local): (&mut Submit, Option<&'static str>) = match submit {
+            Some(given) => (given, Some(system_spooler().unwrap_or("local"))),
             None => {
                 require_printing_enabled()?;
-                &mut system
+                (&mut system, system_spooler())
             }
         };
         let print_job = PrintJob {
@@ -691,7 +700,7 @@ fn render_and_spool_via(doc: &Document, p: &Value, cmd: &str, spooler: Option<&S
             landscape: p.get("orientation").and_then(Value::as_str) == Some("landscape"),
             pdf,
         };
-        let (where_, via) = spool_job(spooler, &print_job, &job, paper_fallback(p), submit)?;
+        let (where_, via) = spool_job(spooler, &print_job, local, &job, paper_fallback(p), submit)?;
         spool = json!(where_);
         backend = json!(via);
         sent = true;

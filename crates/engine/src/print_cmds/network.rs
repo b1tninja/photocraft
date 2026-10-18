@@ -168,7 +168,7 @@ fn put(out: &mut [u8], (w, x, y): (usize, usize, usize), rgb: [u8; 3], colour: b
             px.copy_from_slice(&rgb);
         }
     } else if let Some(px) = out.get_mut(y * w + x) {
-        *px = ((u32::from(rgb[0]) * 77 + u32::from(rgb[1]) * 150 + u32::from(rgb[2]) * 29) >> 8) as u8;
+        *px = super::luma709(rgb[0], rgb[1], rgb[2]);
     }
 }
 
@@ -292,5 +292,14 @@ mod tests {
         let row = |p: &RasterPage| p.pixels[8 * 4..8 * 5].to_vec();
         assert_eq!(row(&plain), [0, 0, 0, 0, 255, 255, 255, 255]);
         assert_eq!(row(&mirrored), [255, 255, 255, 255, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_grey_raster_pixel_is_rec_709_like_the_pdf_and_the_preview() {
+        let mut out = [0u8; 1];
+        put(&mut out, (1, 0, 0), [255, 0, 0], false);
+        assert_eq!(out[0], super::super::luma709(255, 0, 0), "red is 54, not Rec. 601's 76");
+        put(&mut out, (1, 0, 0), [255, 255, 255], false);
+        assert_eq!(out[0], 255);
     }
 }
