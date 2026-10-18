@@ -654,7 +654,7 @@ fn render_and_spool_via(doc: &Document, p: &Value, cmd: &str, spooler: Option<&S
     // job (the route order in `spool_job`), on Windows too: neither may enter the native path
     // below, which would print on the local default printer instead.
     let named_server = p.get("printServer").and_then(Value::as_str).is_some_and(|v| !v.is_empty());
-    let skip_native = named_server || spooler.is_some_and(|sp| sp.preferred);
+    let skip_native = named_server || spooler.is_some_and(|sp| sp.preferred) || submit.is_some();
     if cfg!(windows) && !skip_native && send && !dry && output.is_none() && native_rgb_compatible(&page, handling) {
         require_printing_enabled()?;
         let printed = print_windows(&page, p, &doc.name, copies)?;
