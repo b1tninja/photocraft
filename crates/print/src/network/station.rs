@@ -7,7 +7,8 @@
 //! sending, following, retrying and reconciling go. The converter (PDF to PWG raster) and the
 //! per-job options go through the registry.
 //!
-//! WS-Eventing push for WS-Print is opt-in: [`events_from_env`] reads `PDFCRAFT_TEST_EVENTS_BIND`.
+//! WS-Eventing push for WS-Print is opt-in, for tests: [`events_from_env`] reads
+//! `PHOTOCRAFT_TEST_EVENTS_BIND` in debug builds only (a release build never opens the listener).
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -20,7 +21,7 @@ use craft_print::{
     BytesSource, DocumentConverter, DocumentFormat, ErrorKind, Job, JobOptions, PrintError, PrintJob, PrintJobConfig, Registry, UserConfirmed, namespaced_id,
 };
 
-use super::{Transport, registered_converter, wsd};
+use super::{Transport, wsd};
 
 /// Which protocol a typed address names.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -62,12 +63,23 @@ pub fn validate(address: &str) -> Result<Protocol, PrintError> {
     Ok(protocol)
 }
 
-/// The WS-Eventing listener configuration the test env var asks for: `PDFCRAFT_TEST_EVENTS_BIND`
-/// (for instance `127.0.0.1:0`). `None` when unset or empty. A bind address that cannot be
-/// advertised (unspecified) is an error.
+/// The test env var that turns the WS-Eventing listener on (in debug builds): its bind address.
+pub const EVENTS_BIND_VAR: &str = "PHOTOCRAFT_TEST_EVENTS_BIND";
+
+/// The WS-Eventing listener configuration the test env var asks for: [`EVENTS_BIND_VAR`]
+/// (for instance `127.0.0.1:0`). Read only in debug builds (tests and development); a release build
+/// never reads it. `None` when unset or empty. A bind address that cannot be advertised
+/// (unspecified) is an error.
 pub fn events_from_env() -> Option<Result<NotifyConfig, PrintError>> {
-    let text = std::env::var("PDFCRAFT_TEST_EVENTS_BIND").ok()?;
-    let text = text.trim();
+    events_from(cfg!(debug_assertions), std::env::var(EVENTS_BIND_VAR).ok().as_deref())
+}
+
+/// [`events_from_env`] for the env var's value `bind` in a debug build (`debug`) or not.
+fn events_from(debug: bool, bind: Option<&str>) -> Option<Result<NotifyConfig, PrintError>> {
+    if !debug {
+        return None;
+    }
+    let text = bind?.trim();
     if text.is_empty() {
         return None;
     }
@@ -76,10 +88,9 @@ pub fn events_from_env() -> Option<Result<NotifyConfig, PrintError>> {
 
 /// [`events_from_env`] for a given text (`ip:port`).
 pub fn events_config(bind: &str) -> Result<NotifyConfig, PrintError> {
-    let addr: SocketAddr =
-        bind.parse().map_err(|e| PrintError::new(ErrorKind::InvalidRequest, format!("PDFCRAFT_TEST_EVENTS_BIND {bind:?} is not ip:port: {e}")))?;
+    let addr: SocketAddr = bind.parse().map_err(|e| PrintError::new(ErrorKind::InvalidRequest, format!("{EVENTS_BIND_VAR} {bind:?} is not ip:port: {e}")))?;
     if addr.ip().is_unspecified() {
-        return Err(PrintError::new(ErrorKind::InvalidRequest, "PDFCRAFT_TEST_EVENTS_BIND must name the address the printer can call, not 0.0.0.0"));
+        return Err(PrintError::new(ErrorKind::InvalidRequest, format!("{EVENTS_BIND_VAR} must name the address the printer can call, not 0.0.0.0")));
     }
     let advertise = format!("http://{}:{}/", addr.ip(), if addr.port() == 0 { 1 } else { addr.port() });
     NotifyConfig::new(addr, &advertise)
@@ -117,9 +128,6 @@ impl Station {
         let registry = Registry::new();
         registry.register(Box::new(backend.clone())).map_err(|e| PrintError::new(ErrorKind::Failed, e.to_string()))?;
         registry.register(Box::new(ipp_backend)).map_err(|e| PrintError::new(ErrorKind::Failed, e.to_string()))?;
-        if let Some(converter) = registered_converter() {
-            registry.set_converter(converter);
-        }
         Ok(Self {
             protocol,
             id: namespaced_id(name, &native),
@@ -132,7 +140,7 @@ impl Station {
         })
     }
 
-    /// Use `converter` for this printer instead of the registered one: the print it was made for.
+    /// Use `converter` for this printer (a document it does not list): the print it was made for.
     pub fn set_converter(&self, converter: Arc<dyn DocumentConverter>) {
         self.registry.set_converter(converter);
     }
@@ -234,5 +242,13 @@ mod tests {
         assert!(events_config("127.0.0.1:0").is_ok());
         assert!(events_config("0.0.0.0:9000").is_err());
         assert!(events_config("nope").is_err());
+    }
+
+    #[test]
+    fn the_events_listener_is_a_photocraft_test_switch_of_debug_builds_only() {
+        assert_eq!(EVENTS_BIND_VAR, "PHOTOCRAFT_TEST_EVENTS_BIND");
+        assert!(matches!(events_from(true, Some(" 127.0.0.1:0 ")), Some(Ok(_))));
+        assert!(events_from(true, Some("")).is_none() && events_from(true, None).is_none());
+        assert!(events_from(false, Some("127.0.0.1:0")).is_none(), "a release build never opens the listener");
     }
 }

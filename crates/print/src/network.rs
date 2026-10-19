@@ -12,7 +12,7 @@
 //!   there the print is [`ErrorKind::UnsupportedFormat`] before a job exists.
 //! * **No retry of an unknown outcome.** `PrintJob` refuses to resend what may have printed.
 
-use std::sync::{Arc, PoisonError, RwLock};
+use std::sync::Arc;
 
 pub use craft_print::ipp;
 pub use craft_print::wsd;
@@ -30,19 +30,6 @@ pub use converter::{RenderFn, RenderSpec, RenderedPages};
 
 /// A transport shared with worker threads: the plain-HTTP one of craft-wsd, or an in-memory fake.
 pub type Transport = Arc<dyn wsd::adapter::Transport + Send + Sync>;
-
-/// The converter every [`station::Station`] opened afterwards registers on its registry.
-static CONVERTER: RwLock<Option<Arc<dyn DocumentConverter>>> = RwLock::new(None);
-
-/// Register the converter the app brings: stations opened from now on use it for a document the
-/// printer does not list. Replaces an earlier one.
-pub fn register_converter(converter: Arc<dyn DocumentConverter>) {
-    *CONVERTER.write().unwrap_or_else(PoisonError::into_inner) = Some(converter);
-}
-
-pub(crate) fn registered_converter() -> Option<Arc<dyn DocumentConverter>> {
-    CONVERTER.read().unwrap_or_else(PoisonError::into_inner).clone()
-}
 
 /// What the person is told when a send failed and the printer may nevertheless have the document.
 pub const CHECK_THE_PRINTER: &str = "the request may have reached the printer: check the printer before sending again";

@@ -18,4 +18,6 @@ network-print = ["craft-print/wsd", "craft-print/ipp"]
 craft-print = { workspace = true }
 
 [dev-dependencies]
-craft-print = { workspace = true, features = ["testing"] }
+# The tests build `network` without the feature (`cargo test -p photocraft-print` runs them), so they
+# bring its backends themselves.
+craft-print = { workspace = true, features = ["testing", "wsd", "ipp"] }
