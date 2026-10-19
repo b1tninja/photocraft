@@ -3299,3 +3299,15 @@ curves	Smooth	Lisser
 	This printer prints one copy at a time.	Cette imprimante n'imprime qu'une copie à la fois.
 	Two-sided:	Recto verso :
 	Waiting in the printer's queue	En attente dans la file de l'imprimante
+
+# Network printer destination and its print status (WS-Print and IPP). Machine-drafted by Claude; not reviewed by a native speaker.
+	Cancel print	Annuler l'impression
+	Ask the printer to cancel this print	Demander à l'imprimante d'annuler cette impression
+	Retry	Réessayer
+	Send this print again as a new attempt (check the printer first if it says so)	Renvoyer cette impression comme nouvelle tentative (vérifiez d'abord l'imprimante si elle l'indique)
+	Reconcile	Rapprocher
+	Look at the printer's job lists (reads only) for a job from the earlier attempt	Chercher dans les listes de travaux de l'imprimante un travail de la tentative précédente (lecture seule)
+	Accept found job	Accepter le travail trouvé
+	Follow the job the printer already has instead of sending again	Suivre le travail que l'imprimante a déjà au lieu de le renvoyer
+	Check now	Vérifier maintenant
+	Read the job's status now	Lire maintenant l'état du travail

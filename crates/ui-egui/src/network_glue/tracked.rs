@@ -12,7 +12,8 @@
 //! reconcile) is shown by the status line below the dialog's section and, with the dialog closed,
 //! by the small status row.
 //!
-//! English only: the strings here are not in the translation catalogs (test build).
+//! English only: the status sentences here are status messages, which stay English (docs/localization.md;
+//! test build). The buttons that act on the print are translated (`status_block`).
 
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::{Duration, Instant};
@@ -48,7 +49,7 @@ pub(crate) struct TrackedView {
     pub note: Option<String>,
     /// What the printer calls itself (empty before a query read it). Never its address.
     pub name: String,
-    /// The WS-Eventing listener, when `PDFCRAFT_TEST_EVENTS_BIND` turned it on.
+    /// The WS-Eventing listener, when `PHOTOCRAFT_TEST_EVENTS_BIND` turned it on (debug builds).
     pub events: Option<String>,
     pub token: CancelToken,
 }

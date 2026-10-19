@@ -394,3 +394,46 @@ fn the_print_dialog_sends_the_page_to_a_network_printer() {
     assert!(sent.starts_with(b"%PDF-"), "a printer that lists PDF gets the print-ready PDF");
     assert!(harness.state().ui.status.contains("Sent to") || harness.state().ui.status.contains("Printed"), "{}", harness.state().ui.status);
 }
+
+/// A print that ends with the dialog closed is told on the status line; one the printer stopped, or one
+/// that failed, is told as an error, and one that printed is not.
+#[test]
+fn a_print_that_ended_badly_is_an_error_on_the_status_line() {
+    use crate::PhotocraftApp;
+    let ended = |transport: Transport| {
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(800.0, 600.0)).with_max_steps(64).build_eframe(move |cc| {
+            PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
+            let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+            app.set_network_transport(transport.clone());
+            app
+        });
+        harness.run_steps(2);
+        {
+            let app = harness.state_mut();
+            app.net_print.state.draft = net::Draft::for_address(ADDRESS);
+            query(&mut app.net_print);
+            app.net_print.state.draft.confirmed = true;
+            // The opposite of what the end should leave, so the line is seen to be set.
+            app.ui.status_error = true;
+            assert!(send(&mut app.net_print));
+        }
+        for _ in 0..400 {
+            harness.run_steps(1);
+            if !harness.state().net_print.state.draft.running() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let app = harness.state();
+        assert!(!app.net_print.state.draft.running(), "the print ended");
+        (app.ui.status.clone(), app.ui.status_error)
+    };
+    let aborts = FakePrinter::new(Config { ending: Ending::Aborts("DocumentFormatError"), ..Default::default() });
+    let (status, error) = ended(Arc::new(MemTransport(aborts)));
+    assert!(status.contains(labels().outcome_aborted) && error, "{status} (error: {error})");
+    let lost = FakePrinter::new(Config::default());
+    let (status, error) = ended(Arc::new(LoseSendReply(lost)));
+    assert!(error, "a failed send is an error: {status}");
+    let (status, error) = ended(Arc::new(MemTransport(FakePrinter::new(Config::default()))));
+    assert!(!error, "a print that printed is no error: {status}");
+}

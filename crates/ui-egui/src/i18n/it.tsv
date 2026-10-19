@@ -4407,3 +4407,14 @@ shape	Appearance	Aspetto
 	This printer prints one copy at a time.	Questa stampante stampa una copia alla volta.
 	Two-sided:	Fronte/retro:
 	Waiting in the printer's queue	In attesa nella coda della stampante
+
+# Network printer destination and its print status (WS-Print and IPP). Machine-drafted by Claude; not reviewed by a native speaker.
+	Cancel print	Annulla stampa
+	Ask the printer to cancel this print	Chiedi alla stampante di annullare questa stampa
+	Send this print again as a new attempt (check the printer first if it says so)	Invia di nuovo questa stampa come nuovo tentativo (controlla prima la stampante se lo indica)
+	Reconcile	Riconcilia
+	Look at the printer's job lists (reads only) for a job from the earlier attempt	Cerca negli elenchi dei lavori della stampante un lavoro del tentativo precedente (sola lettura)
+	Accept found job	Accetta il lavoro trovato
+	Follow the job the printer already has instead of sending again	Segui il lavoro che la stampante ha già invece di inviarlo di nuovo
+	Check now	Controlla ora
+	Read the job's status now	Leggi ora lo stato del lavoro

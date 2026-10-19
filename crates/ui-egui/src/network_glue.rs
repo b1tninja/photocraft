@@ -17,9 +17,9 @@
 //! retries only what is safe, and says "check the printer before sending again" when the outcome of a
 //! send is unknown. craft-ui's job model is fed from the same worker.
 //!
-//! Strings go through `nt!` (the translation catalogs, English when a language has no row) rather than
-//! `tl!`: the wording is new and machine-drafted for a few languages, and the catalog completeness tests
-//! only count `tl!` literals.
+//! The dialog's wording goes through `tl!`, so every catalog that claims complete menus carries it (the
+//! rows were machine-drafted and await a native speaker's review). The tracked print's status sentences
+//! (`tracked`) are status messages, which stay English (docs/localization.md).
 
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 
@@ -36,13 +36,6 @@ use tracked::{Command, Slot};
 use photocraft_engine::print_cmds::NetworkPrint;
 use photocraft_print::network::RenderedPages;
 
-/// Translate a string literal of this module (see the module documentation).
-macro_rules! nt {
-    ($s:expr) => {
-        $crate::i18n::t($s)
-    };
-}
-
 /// Any transport that can be shared with the worker threads (tests give an in-memory printer).
 pub type Transport = photocraft_print::network::Transport;
 
@@ -54,8 +47,8 @@ pub(crate) const FORMATS: &[&str] = &["application/pdf", "image/pwg-raster"];
 /// WS-Eventing listener, kept for the query and for the jobs that follow, keyed by the typed address.
 pub(crate) type Stations = Arc<Mutex<Option<(String, Arc<Station>)>>>;
 
-/// The station for `address`: the one already open for that text, else a new one. `PDFCRAFT_TEST_EVENTS_BIND`
-/// (test builds) turns the WS-Eventing listener on for a WS-Print printer.
+/// The station for `address`: the one already open for that text, else a new one. `PHOTOCRAFT_TEST_EVENTS_BIND`
+/// (debug builds) turns the WS-Eventing listener on for a WS-Print printer.
 fn station_for(stations: &Stations, address: &str, transport: Option<Transport>) -> Result<Arc<Station>, PrintError> {
     let mut slot = lock(stations);
     if let Some((typed, station)) = slot.as_ref()
@@ -68,7 +61,7 @@ fn station_for(stations: &Stations, address: &str, transport: Option<Transport>)
     Ok(station)
 }
 
-/// A new station for `address`. `PDFCRAFT_TEST_EVENTS_BIND` (test builds) turns the WS-Eventing listener on
+/// A new station for `address`. `PHOTOCRAFT_TEST_EVENTS_BIND` (debug builds) turns the WS-Eventing listener on
 /// for a WS-Print printer.
 fn open_station(address: &str, transport: Option<Transport>) -> Result<Station, PrintError> {
     let events = match station::events_from_env() {
@@ -271,7 +264,7 @@ pub(crate) fn send_job(
 
 /// TEST BUILD: the status of the tracked print (a line built from its `JobView`, the retry advice, the last
 /// answer of a command) and the buttons that make sense for the state. `row`: the small row shown with the
-/// dialog closed (adds Dismiss). English only.
+/// dialog closed (adds Dismiss). The status lines are English (status messages); the buttons are translated.
 pub(crate) fn status_block(ui: &mut egui::Ui, slot: &Slot, row: bool) -> bool {
     let Some(view) = lock(slot).as_ref().and_then(|t| t.view()) else { return false };
     let mut dismiss = false;
@@ -298,12 +291,12 @@ pub(crate) fn status_block(ui: &mut egui::Ui, slot: &Slot, row: bool) -> bool {
                 tracked.send(command);
             }
         };
-        ask(buttons.cancel, "Cancel print", "Ask the printer to cancel this print", Command::Cancel);
-        ask(buttons.retry, "Retry", "Send this print again as a new attempt (check the printer first if it says so)", Command::Retry);
-        ask(buttons.reconcile, "Reconcile", "Look at the printer's job lists (reads only) for a job from the earlier attempt", Command::Reconcile);
-        ask(buttons.accept, "Accept found job", "Follow the job the printer already has instead of sending again", Command::AcceptFound);
-        ask(buttons.refresh, "Check now", "Read the job's status now", Command::Refresh);
-        if row && ui.button("Dismiss").clicked() {
+        ask(buttons.cancel, tl!("Cancel print"), tl!("Ask the printer to cancel this print"), Command::Cancel);
+        ask(buttons.retry, tl!("Retry"), tl!("Send this print again as a new attempt (check the printer first if it says so)"), Command::Retry);
+        ask(buttons.reconcile, tl!("Reconcile"), tl!("Look at the printer's job lists (reads only) for a job from the earlier attempt"), Command::Reconcile);
+        ask(buttons.accept, tl!("Accept found job"), tl!("Follow the job the printer already has instead of sending again"), Command::AcceptFound);
+        ask(buttons.refresh, tl!("Check now"), tl!("Read the job's status now"), Command::Refresh);
+        if row && ui.button(tl!("Dismiss")).clicked() {
             dismiss = true;
         }
     });
@@ -316,75 +309,74 @@ pub(crate) fn status_block(ui: &mut egui::Ui, slot: &Slot, row: bool) -> bool {
 /// The wording of the destination, in the interface language. Templates keep their `{...}` holes.
 pub(crate) fn labels() -> Labels<'static> {
     Labels {
-        address: nt!("Printer address:"),
+        address: tl!("Printer address:"),
         address_hint: "http://192.168.1.50:5357/service  or  ipp://192.168.1.50:631/ipp/print",
-        address_note: nt!("Only IP addresses on this network are accepted (private, link-local or loopback), not host names."),
-        query_printer: nt!("Query printer"),
-        querying: nt!("Asking the printer…"),
-        query_first: nt!("Query the printer first to see what it supports."),
-        printer_status: nt!("Printer status: {state}"),
-        reasons: nt!("Reasons: {reasons}"),
-        no_common_format: nt!("The printer accepts none of the formats this document can be sent in"),
-        copies: nt!("Copies:"),
-        sides: nt!("Two-sided:"),
-        sides_off: nt!("Off"),
-        sides_long_edge: nt!("Flip on long edge"),
-        sides_short_edge: nt!("Flip on short edge"),
-        orientation: nt!("Printer orientation:"),
-        portrait: nt!("Portrait"),
-        landscape: nt!("Landscape"),
-        reverse_portrait: nt!("Reverse portrait"),
-        reverse_landscape: nt!("Reverse landscape"),
-        quality: nt!("Quality:"),
-        draft: nt!("Draft"),
-        normal: nt!("Normal"),
-        high: nt!("High"),
-        photo: nt!("Photo"),
-        // The three-state wording is plain English (not `tl!`) so the catalogs stay complete; TEST BUILD.
-        color: nt!("Colour:"),
-        color_color: nt!("Colour"),
-        color_monochrome: nt!("Grayscale"),
-        resolution: nt!("Resolution:"),
+        address_note: tl!("Only IP addresses on this network are accepted (private, link-local or loopback), not host names."),
+        query_printer: tl!("Query printer"),
+        querying: tl!("Asking the printer…"),
+        query_first: tl!("Query the printer first to see what it supports."),
+        printer_status: tl!("Printer status: {state}"),
+        reasons: tl!("Reasons: {reasons}"),
+        no_common_format: tl!("The printer accepts none of the formats this document can be sent in"),
+        copies: tl!("Copies:"),
+        sides: tl!("Two-sided:"),
+        sides_off: tl!("Off"),
+        sides_long_edge: tl!("Flip on long edge"),
+        sides_short_edge: tl!("Flip on short edge"),
+        orientation: tl!("Printer orientation:"),
+        portrait: tl!("Portrait"),
+        landscape: tl!("Landscape"),
+        reverse_portrait: tl!("Reverse portrait"),
+        reverse_landscape: tl!("Reverse landscape"),
+        quality: tl!("Quality:"),
+        draft: tl!("Draft"),
+        normal: tl!("Normal"),
+        high: tl!("High"),
+        photo: tl!("Photo"),
+        color: tl!("Colour:"),
+        color_color: tl!("Colour"),
+        color_monochrome: tl!("Grayscale"),
+        resolution: tl!("Resolution:"),
         resolution_dpi: "{dpi} dpi",
         resolution_dpi_xy: "{x} x {y} dpi",
-        auto: nt!("Auto"),
-        unsupported_copies: nt!("This printer prints one copy at a time."),
-        unsupported_sides: nt!("This printer only prints one-sided."),
-        unsupported_orientation: nt!("This printer does not take an orientation setting."),
-        unsupported_quality: nt!("This printer does not take a quality setting."),
-        unsupported_color: nt!("This printer only prints in grayscale."),
-        unsupported_resolution: nt!("This printer does not take a resolution setting."),
-        unconfirmed_note: nt!("Not confirmed by the printer."),
-        confirm: nt!("I confirm sending this document to this printer"),
-        sending: nt!("Sending to {printer}…"),
-        canceling: nt!("Canceling…"),
-        cancel: nt!("Cancel"),
-        sent: nt!("Sent to {printer}"),
-        accepted: nt!("Accepted by {printer}"),
-        stage_waiting: nt!("Waiting in the printer's queue"),
-        stage_held: nt!("Held by the printer"),
-        stage_printing: nt!("The printer is printing it"),
-        stage_stopped: nt!("The printer paused the job; it needs attention"),
-        sheets: nt!("Sheets printed: {n}"),
-        sheets_progress: nt!("Sheets printed: {done} of {total}"),
-        outcome_warnings: nt!("Printed with warnings"),
-        outcome_errors: nt!("Printed with errors"),
-        outcome_canceled: nt!("The job was canceled"),
-        outcome_aborted: nt!("The printer stopped the job"),
-        outcome_forgotten: nt!("The printer no longer lists the job; it most likely finished"),
-        outcome_still_running: nt!("Still printing; the job continues on the printer"),
-        outcome_accepted_unknown: nt!("Sent. The printer can't say whether it printed."),
-        outcome_unknown_warning: nt!("The printer may have received the document. Check the printer before sending again."),
-        failure_policy: nt!("The printer address was refused"),
-        failure_transport: nt!("Couldn't reach the printer"),
-        failure_protocol: nt!("The printer's reply couldn't be understood"),
-        failure_fault: nt!("The printer refused the request"),
-        failure_no_common_format: nt!("The printer accepts none of the formats this document can be sent in"),
-        failure_unsupported: nt!("The printer doesn't support this setting"),
-        failure_encode: nt!("The document couldn't be prepared"),
-        failure_invalid: nt!("A setting isn't valid"),
-        failure_stopped: nt!("The print job stopped unexpectedly"),
-        failure_other: nt!("The print job stopped unexpectedly"),
+        auto: tl!("Auto"),
+        unsupported_copies: tl!("This printer prints one copy at a time."),
+        unsupported_sides: tl!("This printer only prints one-sided."),
+        unsupported_orientation: tl!("This printer does not take an orientation setting."),
+        unsupported_quality: tl!("This printer does not take a quality setting."),
+        unsupported_color: tl!("This printer only prints in grayscale."),
+        unsupported_resolution: tl!("This printer does not take a resolution setting."),
+        unconfirmed_note: tl!("Not confirmed by the printer."),
+        confirm: tl!("I confirm sending this document to this printer"),
+        sending: tl!("Sending to {printer}…"),
+        canceling: tl!("Canceling…"),
+        cancel: tl!("Cancel"),
+        sent: tl!("Sent to {printer}"),
+        accepted: tl!("Accepted by {printer}"),
+        stage_waiting: tl!("Waiting in the printer's queue"),
+        stage_held: tl!("Held by the printer"),
+        stage_printing: tl!("The printer is printing it"),
+        stage_stopped: tl!("The printer paused the job; it needs attention"),
+        sheets: tl!("Sheets printed: {n}"),
+        sheets_progress: tl!("Sheets printed: {done} of {total}"),
+        outcome_warnings: tl!("Printed with warnings"),
+        outcome_errors: tl!("Printed with errors"),
+        outcome_canceled: tl!("The job was canceled"),
+        outcome_aborted: tl!("The printer stopped the job"),
+        outcome_forgotten: tl!("The printer no longer lists the job; it most likely finished"),
+        outcome_still_running: tl!("Still printing; the job continues on the printer"),
+        outcome_accepted_unknown: tl!("Sent. The printer can't say whether it printed."),
+        outcome_unknown_warning: tl!("The printer may have received the document. Check the printer before sending again."),
+        failure_policy: tl!("The printer address was refused"),
+        failure_transport: tl!("Couldn't reach the printer"),
+        failure_protocol: tl!("The printer's reply couldn't be understood"),
+        failure_fault: tl!("The printer refused the request"),
+        failure_no_common_format: tl!("The printer accepts none of the formats this document can be sent in"),
+        failure_unsupported: tl!("The printer doesn't support this setting"),
+        failure_encode: tl!("The document couldn't be prepared"),
+        failure_invalid: tl!("A setting isn't valid"),
+        failure_stopped: tl!("The print job stopped unexpectedly"),
+        failure_other: tl!("The print job stopped unexpectedly"),
     }
 }
 
@@ -408,6 +400,12 @@ fn notice_text(labels: &Labels<'_>, job: &net::JobView, name: &str) -> Option<St
         }
         _ => None,
     }
+}
+
+/// Whether a print that ended is told as an error: it failed, or the printer stopped it or finished it with errors.
+fn ended_badly(job: &net::JobView) -> bool {
+    use net::Outcome::{Aborted, CompletedWithErrors};
+    matches!(job, net::JobView::Failed(_) | net::JobView::Finished(net::Report { outcome: Aborted | CompletedWithErrors, .. }))
 }
 
 impl NetTasks {
@@ -442,7 +440,7 @@ impl NetTasks {
             return;
         }
         let slot = Arc::clone(&self.tracked);
-        egui::Window::new(nt!("Print status"))
+        egui::Window::new(tl!("Print status"))
             .id(egui::Id::new("print-status-row"))
             .anchor(egui::Align2::RIGHT_BOTTOM, [-12.0, -12.0])
             .collapsible(false)
@@ -464,7 +462,7 @@ impl crate::PhotocraftApp {
     pub(crate) fn frame_network(&mut self, ctx: &egui::Context) {
         if let Some(message) = self.net_print.poll(ctx) {
             self.ui.status = message;
-            self.ui.status_error = false;
+            self.ui.status_error = ended_badly(&self.net_print.state.draft.job);
         }
         if !self.ui.dialogs.iter().any(|d| crate::file_ui::owns(&d.fields)) {
             self.net_print.show_status_row(ctx);

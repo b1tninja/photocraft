@@ -828,9 +828,9 @@ fn printer_entries(app: &PhotocraftApp, f: &Map<String, Value>, native: Option<&
     };
     #[cfg(network_print)]
     {
-        entries.push((NETWORK_ENTRY.to_string(), crate::i18n::t("Network printer…").to_string()));
+        entries.push((NETWORK_ENTRY.to_string(), tl!("Network printer…").to_string()));
         if let Some(name) = queried_network_name(app) {
-            entries.push((NETWORK_KNOWN.to_string(), format!("{name} ({})", crate::i18n::t("network"))));
+            entries.push((NETWORK_KNOWN.to_string(), format!("{name} ({})", tl!("network"))));
         }
     }
     #[cfg(not(network_print))]
@@ -860,8 +860,9 @@ fn choose_printer(app: &mut PhotocraftApp, f: &mut Map<String, Value>, value: &s
     }
     if s(f, "printer", "") != value {
         f.insert("printer".into(), json!(value));
+        // Driver settings belong to the printer they were chosen for, whichever list the pick came from.
+        f.remove("printerSettings");
         if native {
-            f.remove("printerSettings");
             driver_page(f);
         }
     }
@@ -1147,7 +1148,7 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                     if s(f, "output", "").is_empty() && !b(f, "dryRun", false) {
                         // Sent to a queue as a PDF at the exact sheet: a queue without the paper is refused
                         // unless the person allows its own paper for it.
-                        check(ui, f, "paperFallback", crate::i18n::t("Use the printer's own paper if it lacks this one"), false);
+                        check(ui, f, "paperFallback", tl!("Use the printer's own paper if it lacks this one"), false);
                     }
                 }
                 if !network {
@@ -1280,7 +1281,7 @@ fn print_body(app: &mut PhotocraftApp, ui: &mut egui::Ui, f: &mut Map<String, Va
                 }
                 #[cfg(network_print)]
                 if network {
-                    head(ui, crate::i18n::t("Network printer"));
+                    head(ui, tl!("Network printer"));
                     let blocked = app.net_print.show(ui, true).block.is_some();
                     f.insert("__netBlocked".into(), json!(blocked));
                 }
@@ -1322,9 +1323,9 @@ fn network_confirm(app: &mut PhotocraftApp, f: &Map<String, Value>) -> Result<Va
     p["grayscale"] = json!(effective_grayscale(app, f));
     let print = photocraft_engine::print_cmds::prepare_network_print(&doc, &p).map_err(|e| e.to_string())?;
     if !app.net_print.send(print) {
-        return Err(crate::i18n::t("Query the printer and tick the confirmation first.").to_string());
+        return Err(tl!("Query the printer and tick the confirmation first.").to_string());
     }
-    app.ui.status = crate::i18n::t("Sending to the network printer…").to_string();
+    app.ui.status = tl!("Sending to the network printer…").to_string();
     app.ui.status_error = false;
     Ok(json!({"sent": false, "network": true}))
 }

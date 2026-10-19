@@ -231,3 +231,23 @@ fn a_queue_may_be_allowed_its_own_paper_in_the_dialog_and_the_choice_reaches_the
     h.run_steps(3);
     assert_eq!(count(&h, label), 0);
 }
+
+/// Driver settings belong to the printer they were chosen for: picking another printer drops them, also
+/// when the pick comes while the network printer is the destination (no driver list is shown then).
+#[test]
+fn another_printer_never_prints_with_the_last_ones_driver_settings() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+    let mut f = Map::new();
+    f.insert("printer".into(), json!("Front Desk"));
+    f.insert("printerSettings".into(), json!("00ff"));
+    #[cfg(network_print)]
+    choose_printer(&mut app, &mut f, NETWORK_ENTRY, false);
+    assert_eq!(f["printerSettings"], "00ff", "the network entry leaves the system printer's settings alone");
+    choose_printer(&mut app, &mut f, "Laser Room", false);
+    assert_eq!(f["printer"], "Laser Room");
+    assert!(!f.contains_key("printerSettings"), "Front Desk's settings went with Laser Room: {f:?}");
+    // Picking the printer already chosen keeps what was set for it.
+    f.insert("printerSettings".into(), json!("00ff"));
+    choose_printer(&mut app, &mut f, "Laser Room", false);
+    assert_eq!(f["printerSettings"], "00ff");
+}

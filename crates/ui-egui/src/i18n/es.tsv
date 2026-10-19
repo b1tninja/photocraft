@@ -4252,3 +4252,14 @@ navigator	Zoom	Zoom
 	This printer prints one copy at a time.	Esta impresora imprime una copia cada vez.
 	Two-sided:	A doble cara:
 	Waiting in the printer's queue	Esperando en la cola de la impresora
+
+# Network printer destination and its print status (WS-Print and IPP). Machine-drafted by Claude; not reviewed by a native speaker.
+	Cancel print	Cancelar impresión
+	Ask the printer to cancel this print	Pedir a la impresora que cancele esta impresión
+	Send this print again as a new attempt (check the printer first if it says so)	Enviar de nuevo esta impresión como un nuevo intento (compruebe antes la impresora si lo indica)
+	Reconcile	Conciliar
+	Look at the printer's job lists (reads only) for a job from the earlier attempt	Buscar en las listas de trabajos de la impresora un trabajo del intento anterior (solo lectura)
+	Accept found job	Aceptar trabajo encontrado
+	Follow the job the printer already has instead of sending again	Seguir el trabajo que la impresora ya tiene en lugar de enviarlo de nuevo
+	Check now	Comprobar ahora
+	Read the job's status now	Leer ahora el estado del trabajo
