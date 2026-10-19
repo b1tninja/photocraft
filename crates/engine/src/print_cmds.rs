@@ -792,6 +792,39 @@ fn printer_settings(p: &Value) -> Result<Option<craft_print::rgb::DevMode>> {
     }
 }
 
+/// The driver settings a Windows job prints with. For Grayscale they carry the driver's monochrome
+/// hint (DEVMODE `dmColor`), as the spooler route's job carries `grayscale`: the chosen settings, or
+/// the printer's own (`defaults`) when none were chosen.
+fn windows_settings(
+    p: &Value,
+    settings: Option<craft_print::rgb::DevMode>,
+    defaults: impl FnOnce() -> Result<craft_print::rgb::DevMode>,
+) -> Result<Option<craft_print::rgb::DevMode>> {
+    if !wants_grayscale(p) {
+        return Ok(settings);
+    }
+    let settings = match settings {
+        Some(dm) => dm,
+        None => defaults()?,
+    };
+    monochrome(&settings).map(Some)
+}
+
+/// `settings` with `dmColor` set to monochrome and marked valid in `dmFields` (DEVMODEW offsets 92
+/// and 72; `DM_COLOR`, `DMCOLOR_MONOCHROME` from wingdi.h). The driver's private part is kept.
+fn monochrome(settings: &craft_print::rgb::DevMode) -> Result<craft_print::rgb::DevMode> {
+    const DM_FIELDS_AT: usize = 72;
+    const DM_COLOR_AT: usize = 92;
+    const DM_COLOR: u32 = 0x0800;
+    const DMCOLOR_MONOCHROME: i16 = 1;
+    let mut bytes = settings.as_bytes().to_vec();
+    let short = || other("printer settings are too short");
+    let fields = bytes.get(DM_FIELDS_AT..DM_FIELDS_AT + 4).and_then(|b| <[u8; 4]>::try_from(b).ok()).map(u32::from_le_bytes).ok_or_else(short)?;
+    bytes.get_mut(DM_FIELDS_AT..DM_FIELDS_AT + 4).ok_or_else(short)?.copy_from_slice(&(fields | DM_COLOR).to_le_bytes());
+    bytes.get_mut(DM_COLOR_AT..DM_COLOR_AT + 2).ok_or_else(short)?.copy_from_slice(&DMCOLOR_MONOCHROME.to_le_bytes());
+    craft_print::rgb::DevMode::from_bytes(bytes).map_err(other)
+}
+
 /// The page's image as 8-bit RGB rows (gray expanded), mirrored for Emulsion Down.
 pub fn page_rgb(page: &PrintPage) -> Result<Vec<u8>> {
     let img = &page.image;
@@ -840,6 +873,7 @@ fn print_windows(page: &PrintPage, p: &Value, title: &str, copies: u32) -> Resul
         Some("noColorManagement") => craft_print::rgb::ColorPolicy::Unmanaged,
         _ => craft_print::rgb::ColorPolicy::DriverManaged,
     };
+    let settings = windows_settings(p, settings, || craft_print::rgb::default_settings(&printer).map_err(other))?;
     let job = craft_print::rgb::Job {
         printer: &printer,
         settings: settings.as_ref(),

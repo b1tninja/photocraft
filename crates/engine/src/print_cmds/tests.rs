@@ -863,3 +863,29 @@ fn a_custom_size_page_goes_on_the_queues_own_paper_when_allowed_and_is_refused_w
     let pdf = std::fs::read(format!("{dir}/slide.pdf")).unwrap();
     assert!(String::from_utf8_lossy(&pdf).contains("/MediaBox [0 0 959.76 540.00]"));
 }
+
+/// Driver settings as the Windows dialog stores them: a bare 156-byte DEVMODEW (no private part),
+/// in colour, with only the paper size marked valid.
+fn devmode() -> craft_print::rgb::DevMode {
+    let mut b = vec![0u8; 156];
+    b[68..70].copy_from_slice(&156u16.to_le_bytes());
+    b[72..76].copy_from_slice(&0x0002u32.to_le_bytes());
+    b[92..94].copy_from_slice(&2i16.to_le_bytes());
+    craft_print::rgb::DevMode::from_bytes(b).unwrap()
+}
+
+#[test]
+fn a_grayscale_windows_job_carries_the_drivers_monochrome_hint() {
+    let field = |dm: &craft_print::rgb::DevMode, at: usize, len: usize| dm.as_bytes()[at..at + len].to_vec();
+    let no_defaults = || -> Result<craft_print::rgb::DevMode> { panic!("the chosen settings are used") };
+    let gray = windows_settings(&json!({"grayscale": true}), Some(devmode()), no_defaults).unwrap().unwrap();
+    assert_eq!(field(&gray, 92, 2), 1i16.to_le_bytes(), "dmColor is DMCOLOR_MONOCHROME");
+    assert_eq!(u32::from_le_bytes(gray.as_bytes()[72..76].try_into().unwrap()), 0x0802, "DM_COLOR is marked valid, the paper still is");
+    assert_eq!(gray.as_bytes().len(), 156);
+    // No settings chosen: the printer's own get the hint.
+    let from_defaults = windows_settings(&json!({"grayscale": true}), None, || Ok(devmode())).unwrap().unwrap();
+    assert_eq!(field(&from_defaults, 92, 2), 1i16.to_le_bytes());
+    // Colour leaves the settings as they are, and asks the driver for nothing.
+    assert_eq!(windows_settings(&json!({}), Some(devmode()), no_defaults).unwrap(), Some(devmode()));
+    assert_eq!(windows_settings(&json!({"grayscale": false}), None, no_defaults).unwrap(), None);
+}

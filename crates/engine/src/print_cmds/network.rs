@@ -55,6 +55,13 @@ pub fn media_for_paper(name: &str) -> Option<&'static str> {
     })
 }
 
+/// The PWG media name for a sheet given in points (the Windows driver's paper is stored as `[w, h]`):
+/// the dialog's preset within about a point, in either orientation. A size that is no preset has none.
+pub fn media_for_size(w: f64, h: f64) -> Option<&'static str> {
+    let near = |a: f64, b: f64| (a - b).abs() <= 1.0;
+    PAPERS.iter().find(|(_, pw, ph)| (near(w, *pw) && near(h, *ph)) || (near(w, *ph) && near(h, *pw))).and_then(|(name, _, _)| media_for_paper(name))
+}
+
 /// Lay out `doc` for a network printer with the Print parameters `p` (the same ones `file.print`
 /// takes: paper, orientation, position, scale, marks, colour handling). Sends nothing.
 pub fn prepare_network_print(doc: &Document, p: &Value) -> Result<NetworkPrint> {
@@ -63,6 +70,10 @@ pub fn prepare_network_print(doc: &Document, p: &Value) -> Result<NetworkPrint> 
     let copies = crate::commands::int(p, "copies").unwrap_or(1).clamp(1, 999) as u32;
     let media = match p.get("paper") {
         Some(Value::String(name)) if PAPERS.iter().any(|(n, _, _)| n.eq_ignore_ascii_case(name)) => media_for_paper(name),
+        Some(Value::Array(size)) => match (size.first().and_then(Value::as_f64), size.get(1).and_then(Value::as_f64)) {
+            (Some(w), Some(h)) => media_for_size(w, h),
+            _ => None,
+        },
         _ => None,
     };
     Ok(NetworkPrint { pdf: Arc::new(print_pdf(&page)), paper, title: doc.name.clone(), copies, media, scale, page: Arc::new(page) })
@@ -239,6 +250,18 @@ mod tests {
         assert!((n.paper.0 - 595.28).abs() < 0.01);
         assert!(prepare_network_print(&doc(), &params(json!({"paper": [300.0, 400.0]}))).unwrap().media.is_none());
         assert!(prepare_network_print(&doc(), &params(json!({"paper": "nope"}))).is_err());
+    }
+
+    /// The Windows dialog keeps the driver's paper as `[w, h]` (a landscape sheet as its swapped size):
+    /// a standard size still names its media for the network printer.
+    #[test]
+    fn a_paper_given_as_a_size_names_the_media_of_its_preset() {
+        let media = |paper: Value| prepare_network_print(&doc(), &params(json!({ "paper": paper }))).unwrap().media;
+        assert_eq!(media(json!([595.28, 841.89])), Some("iso_a4_210x297mm"));
+        assert_eq!(media(json!([841.89, 595.28])), Some("iso_a4_210x297mm"));
+        assert_eq!(media(json!([595.0, 842.0])), Some("iso_a4_210x297mm"), "a driver's rounding is within a point");
+        assert_eq!(media(json!([612, 792])), Some("na_letter_8.5x11in"));
+        assert_eq!(media(json!([500.0, 700.0])), None);
     }
 
     #[test]
