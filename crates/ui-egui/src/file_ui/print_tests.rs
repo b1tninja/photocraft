@@ -32,6 +32,7 @@ fn count(h: &Harness<'_, PhotocraftApp>, label: &str) -> usize {
 }
 
 /// Every label and value on screen, for a failing assertion's message.
+#[cfg(network_print)]
 fn dump(h: &Harness<'_, PhotocraftApp>) -> String {
     use egui_kittest::kittest::NodeT as _;
     let mut all = String::new();
@@ -62,6 +63,7 @@ fn pick(h: &mut Harness<'_, PhotocraftApp>, label: &str) {
     h.run_steps(3);
 }
 
+#[cfg(network_print)]
 fn top(h: &Harness<'_, PhotocraftApp>, label: &str) -> f32 {
     h.query_all_by_label(label).last().or_else(|| h.query_all_by_value(label).last()).unwrap().rect().min.y
 }
