@@ -5,17 +5,23 @@ use super::*;
 use crate::PhotocraftApp;
 use egui_kittest::{Harness, kittest::Queryable};
 
-fn printers() {
-    photocraft_engine::print_cmds::use_printer_list(Some(vec![("Front Desk".into(), false), ("Laser Room".into(), true)]));
+/// Stand-in system printers, in place of the spooler's.
+fn printers() -> photocraft_engine::print_cmds::PrinterSource {
+    std::sync::Arc::new(|| {
+        vec![
+            craft_print::Printer { name: "Front Desk".into(), default: false, two_sided: None, description: String::new() },
+            craft_print::Printer { name: "Laser Room".into(), default: true, two_sided: None, description: String::new() },
+        ]
+    })
 }
 
 /// An app with a 60 x 40 document and the Print dialog open on the system printers (the Windows driver
 /// list is dropped, so nothing asks a driver for its paper).
 fn open() -> (Harness<'static, PhotocraftApp>, u64) {
-    printers();
     let mut harness = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).with_max_steps(64).build_eframe(|cc| {
         PhotocraftApp::setup_context(&cc.egui_ctx, Default::default());
         let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), Default::default());
+        app.session.printer_source = Some(printers());
         app.run("file.new", json!({"name": "photo", "width": 60, "height": 40})).unwrap();
         app
     });
